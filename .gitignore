@@ -3,3 +3,4 @@ data/model
 data/output
 .DS_Store
 .idea/
+.env

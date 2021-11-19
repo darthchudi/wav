@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/cloudinary/cloudinary-go"
+	"github.com/cloudinary/cloudinary-go/api/uploader"
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
 	"io"
@@ -20,6 +22,7 @@ func bytesToMb(size int64) float64 {
 
 type Handler struct {
 	container *Container
+	cloudinary *cloudinary.Cloudinary
 }
 
 func (h *Handler) getStemsHandler(w http.ResponseWriter, r *http.Request) {
@@ -67,9 +70,52 @@ func (h *Handler) getStemsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate that song exists
+	// Check that folder exists
+	err = h.uploadToCloudinary(r.Context(), tmpFile.Name())
+	if err != nil {
+		log.Fatalf("failed to upload song to cdn: %v", err)
+		http.Error(w, "failed to upload song to cdn", http.StatusInternalServerError)
+		return
+	}
+
 	fmt.Printf("💖 Successfully split song in %v", time.Since(start))
 
 	w.Write([]byte("Done"))
+}
+
+
+// Todo: read env from .env file
+// Todo: Get output directory name from file name, comes in format: data/input/169857898-Drake - TSU (Official Audio).mp3
+// Todo: Test upload
+func (h *Handler) uploadToCloudinary(ctx context.Context, dirname string) error {
+	dirname = "169857898-Drake - TSU (Official Audio)"
+
+	files, err := ioutil.ReadDir(fmt.Sprintf("data/output/%v", dirname))
+	if err != nil {
+		return err
+	}
+
+	var uploadResults []*uploader.UploadResult
+	for _, file := range files {
+		pathToFile := fmt.Sprintf("data/output/%v/%v", dirname, file.Name())
+		fmt.Printf("path to file: %v", pathToFile)
+
+		rsp, err := h.cloudinary.Upload.Upload(ctx, pathToFile, uploader.UploadParams{
+			PublicID: fmt.Sprintf("stems/%v/%v", dirname, file.Name()),
+		})
+		if err != nil {
+			return err
+		}
+
+		uploadResults = append(uploadResults, rsp)
+	}
+
+	for _, result := range uploadResults {
+		fmt.Printf("Upload url: %v", result.URL)
+	}
+
+	return nil
 }
 
 
@@ -81,7 +127,17 @@ func main() {
 		log.Fatalf("Failed to create container: %v", err)
 	}
 
-	handler := &Handler{container: container}
+	cld, err := cloudinary.NewFromParams(os.Getenv("CLOUDINARY_NAME"), os.Getenv("CLOUDINARY_API_KEY"), os.Getenv("CLOUDINARY_API_SECRET"))
+	if err != nil {
+		log.Fatalf("Failed to create cloudinary client: %v", err)
+	}
+
+	handler := &Handler{
+		container: container,
+		cloudinary: cld,
+	}
+
+	log.Fatal(handler.uploadToCloudinary(context.Background(), ""))
 
 	r := mux.NewRouter()
 	r.HandleFunc("/get-stems", handler.getStemsHandler).Methods(http.MethodPost, http.MethodOptions)
