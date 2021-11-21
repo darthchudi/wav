@@ -6,7 +6,9 @@ import (
 	"github.com/cloudinary/cloudinary-go"
 	"github.com/cloudinary/cloudinary-go/api/uploader"
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	"github.com/rs/cors"
+	"golang.org/x/sync/errgroup"
 	"io"
 	"io/ioutil"
 	"log"
@@ -26,8 +28,6 @@ type Handler struct {
 }
 
 func (h *Handler) getStemsHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Print("✨ splitting song with spleeter")
-
 	start := time.Now()
 
 	r.Body = http.MaxBytesReader(w, r.Body, MAX_UPLOAD_SIZE)
@@ -46,9 +46,6 @@ func (h *Handler) getStemsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer formFile.Close()
-
-	fmt.Printf("File name: %v\n", fileHeader.Filename)
-	fmt.Printf("File Size: %vMB\n", bytesToMb(fileHeader.Size))
 
 	tmpFilePattern := fmt.Sprintf("*-%v", fileHeader.Filename)
 	tmpFile, err := ioutil.TempFile(INPUT_DIRECTORY, tmpFilePattern)
@@ -70,49 +67,56 @@ func (h *Handler) getStemsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate that song exists
-	// Check that folder exists
-	err = h.uploadToCloudinary(r.Context(), tmpFile.Name())
+	outputDirectory := getOutputDirectoryFromTmpFileName(tmpFile.Name())
+	err = h.uploadToCloudinary(r.Context(), outputDirectory)
 	if err != nil {
 		log.Fatalf("failed to upload song to cdn: %v", err)
 		http.Error(w, "failed to upload song to cdn", http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Printf("💖 Successfully split song in %v", time.Since(start))
+	fmt.Printf("💖 Successfully split song in %v\n", time.Since(start))
 
 	w.Write([]byte("Done"))
 }
 
-
-// Todo: read env from .env file
-// Todo: Get output directory name from file name, comes in format: data/input/169857898-Drake - TSU (Official Audio).mp3
-// Todo: Test upload
-func (h *Handler) uploadToCloudinary(ctx context.Context, dirname string) error {
-	dirname = "169857898-Drake - TSU (Official Audio)"
-
-	files, err := ioutil.ReadDir(fmt.Sprintf("data/output/%v", dirname))
+func (h *Handler) uploadToCloudinary(ctx context.Context, outputDirectory string) error {
+	files, err := ioutil.ReadDir(fmt.Sprintf("data/output/%v", outputDirectory))
 	if err != nil {
 		return err
 	}
 
-	var uploadResults []*uploader.UploadResult
-	for _, file := range files {
-		pathToFile := fmt.Sprintf("data/output/%v/%v", dirname, file.Name())
-		fmt.Printf("path to file: %v", pathToFile)
+	if len(files) == 0 {
+		return fmt.Errorf("no stems were found for the song in the directory %v", outputDirectory)
+	}
 
-		rsp, err := h.cloudinary.Upload.Upload(ctx, pathToFile, uploader.UploadParams{
-			PublicID: fmt.Sprintf("stems/%v/%v", dirname, file.Name()),
+	g, ctx := errgroup.WithContext(ctx)
+
+	uploadResults := make([]*uploader.UploadResult, len(files))
+	for i, file := range files {
+		i, file := i, file // bind loop variables within closure https://golang.org/doc/faq#closures_and_goroutines
+
+		g.Go(func() error {
+			uploadFilePath := fmt.Sprintf("data/output/%v/%v", outputDirectory, file.Name())
+
+			rsp, err := h.cloudinary.Upload.Upload(ctx, uploadFilePath, uploader.UploadParams{
+				PublicID: fmt.Sprintf("stems/%v/%v", outputDirectory, stripExtensionFromFileBaseName(file.Name())),
+			})
+			if err != nil {
+				return err
+			}
+
+			uploadResults[i] = rsp
+
+			return nil
 		})
-		if err != nil {
-			return err
-		}
-
-		uploadResults = append(uploadResults, rsp)
+	}
+	if err := g.Wait(); err != nil {
+		return fmt.Errorf("failed to upload file: %v", err)
 	}
 
 	for _, result := range uploadResults {
-		fmt.Printf("Upload url: %v", result.URL)
+		fmt.Printf("Upload url: %v\n", result.URL)
 	}
 
 	return nil
@@ -121,6 +125,11 @@ func (h *Handler) uploadToCloudinary(ctx context.Context, dirname string) error 
 
 func main() {
 	ctx := context.Background()
+
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error reading .env file")
+	}
 
 	container, err := NewContainer(ctx)
 	if err != nil {
@@ -136,8 +145,6 @@ func main() {
 		container: container,
 		cloudinary: cld,
 	}
-
-	log.Fatal(handler.uploadToCloudinary(context.Background(), ""))
 
 	r := mux.NewRouter()
 	r.HandleFunc("/get-stems", handler.getStemsHandler).Methods(http.MethodPost, http.MethodOptions)

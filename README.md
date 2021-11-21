@@ -15,4 +15,4 @@ To split a song, Wav executes Spleeter within a Docker container
 ### Goals/Roadmap
 
 - Compress output wav stems into the smallest possible size without compromising on audio quality (ffmpeg?)
-- Use GPU version of Deezer's Spleeter for faster compression times 
+- Use GPU version of Deezer's Spleeter for faster split times 
