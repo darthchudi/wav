@@ -1,6 +1,9 @@
-package main
+package handler
 
-import "path/filepath"
+import (
+	"math"
+	"path/filepath"
+)
 
 func stripExtensionFromFileBaseName(baseName string) string {
 	fileExtension := filepath.Ext(baseName)
@@ -12,4 +15,6 @@ func getOutputDirectoryFromTmpFileName(tmpFileName string) string {
 	return stripExtensionFromFileBaseName(baseName)
 }
 
-
+func bytesToMb(size int64) float64 {
+	return float64(size) / math.Pow(10, 6)
+}
