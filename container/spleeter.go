@@ -1,4 +1,4 @@
-package main
+package container
 
 import (
 	"bufio"
@@ -11,6 +11,13 @@ import (
 	"time"
 )
 
+const (
+	SPLEETER_IMAGE = "researchdeezer/spleeter"
+	SPLEETER_CONTAINER_MODEL_PATH = "MODEL_PATH=/model"
+)
+
+// Container is a spleeter docker container that can run commamnds
+// to get stems
 type Container struct {
 	// Client for executing commands to docker
 	client dexec.Docker
@@ -56,13 +63,6 @@ func NewContainer(ctx context.Context) (*Container, error) {
 		client:                    dockerExecClient,
 		containerCommandExecution: spleeterContainer,
 	}, nil
-}
-
-// sanitizeFileName replaces the data/ prefix in the tmp filename
-// The data/input directory on the filesystem is mounted as /input
-// in the container
-func sanitizeFileName(fileName string) string {
-	return strings.ReplaceAll(fileName, "data/", "")
 }
 
 // Run splits a file in the data/input directory into
@@ -120,4 +120,11 @@ func (c *Container) Run(fileName string) error {
 	}
 
 	return  nil
+}
+
+// sanitizeFileName replaces the data/ prefix in the tmp filename
+// The data/input directory on the filesystem is mounted as /input
+// in the container
+func sanitizeFileName(fileName string) string {
+	return strings.ReplaceAll(fileName, "data/", "")
 }
